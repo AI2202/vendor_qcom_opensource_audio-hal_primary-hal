@@ -160,6 +160,20 @@ public:
     int SetVoiceVolume(float volume);
     void SetChargingMode(bool is_charging);
     void FillAndroidDeviceMap();
+//Jessy +++ outdoor mode and SMMI Mic test
+#if defined ASUS_AI2201_PROJECT || defined ASUS_DAVINCI_PROJECT
+    void set_outdoor();
+    bool outdoor_mode_enabled;
+    int outdoor_stream_state;
+    int active_stream_state;
+    int smmi_tool_mic_test;
+#endif
+//Jessy ---
+//ASUS_BSP +++ Game mode
+#if defined ASUS_AI2201_PROJECT || defined ASUS_DAVINCI_PROJECT
+    bool game_mode_enabled;
+#endif
+//ASUS_BSP ---
     int GetPalDeviceIds(
             const std::set<audio_devices_t>& hal_device_id,
             pal_device_id_t* pal_device_id);
@@ -187,6 +201,10 @@ public:
     int  hdr_channel_count = 0;
     int  hdr_sample_rate = 0;
     int cameraOrientation = CAMERA_DEFAULT;
+#ifdef ASUS_DAVINCI_PROJECT // ASUS_BSP for mappingtable
+    bool camcorder_facing = false;
+    int camcorder_rotation_degree = 0;
+#endif
     bool usb_input_dev_enabled = false;
     static bool mic_characteristics_available;
     static microphone_characteristics_t microphones;

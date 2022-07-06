@@ -59,6 +59,9 @@
 #include <audio_extn/AudioExtn.h>
 #include "audio_extn.h"
 #include "battery_listener.h"
+/* ASUS_BSP For CS35L45 AMP boot initial process */
+#include <tinyalsa/asoundlib.h>
+#include <cutils/properties.h>
 
 #define MIC_CHARACTERISTICS_XML_FILE "/vendor/etc/microphone_characteristics.xml"
 static pal_device_id_t in_snd_device = PAL_DEVICE_NONE;
@@ -401,6 +404,48 @@ void AudioDevice::CloseStreamOut(std::shared_ptr<StreamOutPrimary> stream) {
     out_list_mutex.unlock();
 }
 
+static bool is_high_imp_headphones(void)
+{
+    struct mixer_ctl *ctl_hphl, *ctl_hphr;
+    struct mixer *mixer = NULL;
+    const char *mixer_ctl_name_hphl = "HPHL Impedance";
+    const char *mixer_ctl_name_hphr = "HPHR Impedance";
+    int zl, zr;
+    
+    mixer = mixer_open(0);
+
+    if (!mixer) {
+        ALOGE("%s: Failed to open mixer",  __func__);
+        return false;
+    }
+
+    ctl_hphl = mixer_get_ctl_by_name(mixer, mixer_ctl_name_hphl);
+    if (!ctl_hphl) {
+        ALOGE("%s: Could not get ctl for mixer ctl name - %s",
+                __func__, mixer_ctl_name_hphl);
+        return false;
+    }
+    ctl_hphr = mixer_get_ctl_by_name(mixer, mixer_ctl_name_hphr);
+    if (!ctl_hphr) {
+        ALOGE("%s: Could not get ctl for mixer ctl name - %s",
+                __func__, mixer_ctl_name_hphr);
+        return false;
+    }
+
+    zl = mixer_ctl_get_value(ctl_hphl, 0);
+    zr = mixer_ctl_get_value(ctl_hphr, 0);
+
+    if (zl < 0 || zr < 0) {
+        ALOGE("%s: Invalid impedance zl %d zr %d", __func__, zl, zr);
+        return false;
+    }
+
+    if (zl > 50 && zr > 50)
+        return true;
+    else
+        return false;
+}
+
 int AudioDevice::CreateAudioPatch(audio_patch_handle_t *handle,
                                   const std::vector<struct audio_port_config>& sources,
                                   const std::vector<struct audio_port_config>& sinks) {
@@ -412,6 +457,24 @@ int AudioDevice::CreateAudioPatch(audio_patch_handle_t *handle,
     audio_io_handle_t io_handle = AUDIO_IO_HANDLE_NONE;
     audio_source_t input_source = AUDIO_SOURCE_DEFAULT;
     std::set<audio_devices_t> device_types;
+// ASUS_BSP for SMMI input/output select +++
+#if defined ASUS_DAVINCI_PROJECT || defined ASUS_AI2201_PROJECT
+    int output_selected = 0;
+    int mic_selected = 0;
+#endif
+// ASUS_BSP for SMMI input/output select ---
+#if defined ASUS_DAVINCI_PROJECT // for game with 3pole use speaker-mic
+    std::shared_ptr<StreamOutPrimary> astream_out = nullptr;
+    bool wired_3pole = false;
+    bool usb_3pole = false;
+    for (int i = 0; i < stream_out_list_.size(); i++) {
+        astream_out = stream_out_list_[i];
+        if (astream_out->isDeviceAvailable(PAL_DEVICE_OUT_WIRED_HEADPHONE))
+            wired_3pole = true;
+        if (astream_out->isDeviceAvailable(PAL_DEVICE_OUT_USB_HEADSET) && !usb_input_dev_enabled)
+            usb_3pole = true;
+    }
+#endif
 
     AHAL_DBG("enter: num sources %zu, num_sinks %zu", sources.size(), sinks.size());
 
@@ -433,13 +496,106 @@ int AudioDevice::CreateAudioPatch(audio_patch_handle_t *handle,
     // Populate source/sink information and fetch stream info
     switch (sources[0].type) {
         case AUDIO_PORT_TYPE_DEVICE: // Patch for audio capture or loopback
-            device_types.insert(sources[0].ext.device.type);
+// ASUS_BSP for SMMI input select +++
+#ifdef ASUS_DAVINCI_PROJECT
+            mic_selected = property_get_int32("vendor.audio.mic.selected", 0);
+            AHAL_INFO("mic_selected %d", mic_selected);
+            if (mic_selected != 0) {
+                switch (mic_selected) {
+                    case 1:
+                        AHAL_INFO("HandsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                        break;
+                    case 2:
+                        AHAL_INFO("speakerMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BACK_MIC);
+                        break;
+                    case 3:
+                        AHAL_INFO("HeadsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_WIRED_HEADSET);
+                        break;
+                }
+            } else if (adev_->smmi_tool_mic_test != 0) {
+                switch (adev_->smmi_tool_mic_test) {
+                    case 1:
+                        AHAL_INFO("HandsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                        break;
+                    case 2:
+                        AHAL_INFO("speakerMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BACK_MIC);
+                        break;
+                    case 3:
+                        AHAL_INFO("HeadsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_WIRED_HEADSET);
+                        break;
+                }
+// ASUS_BSP for SMMI input select ---
+            } else if(adev_->game_mode_enabled && (wired_3pole || usb_3pole) ) { // for game with 3pole use speaker-mic
+                device_types.insert(AUDIO_DEVICE_IN_BACK_MIC);
+            } else 
+#elif defined ASUS_AI2201_PROJECT
+            mic_selected = property_get_int32("vendor.audio.mic.selected", 0);
+            AHAL_INFO("mic_selected %d", mic_selected);
+            if (mic_selected != 0) {
+                switch (mic_selected) {
+                    case 1:
+                        AHAL_INFO("HandsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                        break;
+                    case 2:
+                        AHAL_INFO("HandsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                        break;
+                    case 3:
+                        AHAL_INFO("HeadsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_WIRED_HEADSET);
+                        break;
+                    case 4:
+                        AHAL_INFO("inCommunication device");
+                        device_types.insert(AUDIO_DEVICE_IN_COMMUNICATION);
+                        break;
+                }
+            } else if (adev_->smmi_tool_mic_test != 0) {
+                switch (adev_->smmi_tool_mic_test) {
+                    case 1:
+                        AHAL_INFO("HandsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                        break;
+                    case 2:
+                        AHAL_INFO("HandsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                        break;
+                    case 3:
+                        AHAL_INFO("HeadsetMic device");
+                        device_types.insert(AUDIO_DEVICE_IN_WIRED_HEADSET);
+                        break;
+                    case 4:
+                        AHAL_INFO("inCommunication device");
+                        device_types.insert(AUDIO_DEVICE_IN_COMMUNICATION);
+                        break;
+                }
+// ASUS_BSP for SMMI output select ---
+#if 0
+// ASUS_BSP remove Game mode mic for Handsfree of voice call/VoIP call/Game VoIP call in sync
+            } else if (adev_->game_mode_enabled && voice_->GetMode() != AUDIO_MODE_IN_CALL &&
+                       (sources[0].ext.device.type == AUDIO_DEVICE_IN_BUILTIN_MIC ||
+                        sources[0].ext.device.type == AUDIO_DEVICE_IN_BACK_MIC)) {
+                AHAL_INFO("inCommunication device for Game mode");
+                device_types.insert(AUDIO_DEVICE_IN_COMMUNICATION);
+#endif
+            } else
+#endif
+            {
+                device_types.insert(sources[0].ext.device.type);
+            }
+            
             if (sinks[0].type == AUDIO_PORT_TYPE_MIX) {
                 io_handle = sinks[0].ext.mix.handle;
                 input_source = sinks[0].ext.mix.usecase.source;
                 patch_type = AudioPatch::PATCH_CAPTURE;
                 AHAL_DBG("Capture patch from device %x to mix %d",
-                          sources[0].ext.device.type, sinks[0].ext.mix.handle);
+                          AudioExtn::get_device_types(device_types), sinks[0].ext.mix.handle);
             } else {
                 /*Device to device patch is not implemented.
                   This space will need changes if audio HAL
@@ -452,8 +608,51 @@ int AudioDevice::CreateAudioPatch(audio_patch_handle_t *handle,
             break;
         case AUDIO_PORT_TYPE_MIX: // Patch for audio playback
             io_handle = sources[0].ext.mix.handle;
-            for (const auto &sink : sinks)
-               device_types.insert(sink.ext.device.type);
+// ASUS_BSP for SMMI output select +++
+#if defined ASUS_DAVINCI_PROJECT || defined ASUS_AI2201_PROJECT
+            output_selected = property_get_int32("vendor.audio.output.selected", 0);
+            AHAL_INFO("output_selected %d", output_selected);
+            if ((sinks.size() == 1) && (output_selected != 0)) {
+                switch (output_selected) {
+                    case 1:
+                        AHAL_INFO("handset device");
+                        device_types.insert(AUDIO_DEVICE_OUT_EARPIECE);
+                        break;
+                    case 2:
+                        AHAL_INFO("stereo speaker device");
+                        device_types.insert(AUDIO_DEVICE_OUT_SPEAKER);
+                        break;
+                    case 3:
+                        AHAL_INFO("headphone device");
+                        device_types.insert(AUDIO_DEVICE_OUT_WIRED_HEADPHONE);
+                        break;
+                    case 4:
+                        AHAL_INFO("stereo speaker device");
+                        device_types.insert(AUDIO_DEVICE_OUT_SPEAKER);
+                        break;
+                }
+					// ASUS_BSP for SMMI output select ---
+            } else 
+#endif
+            {
+                for (const auto &sink : sinks)
+                    device_types.insert(sink.ext.device.type);
+            }
+            
+//ASUS_BSP for high imp headphones +++
+            if(AudioExtn::audio_devices_cmp(device_types, AUDIO_DEVICE_OUT_WIRED_HEADSET) || 
+               AudioExtn::audio_devices_cmp(device_types, AUDIO_DEVICE_OUT_WIRED_HEADPHONE)) {
+                pal_param_high_imp_state_t param_high_imp_st;
+                if(is_high_imp_headphones()) {
+                    param_high_imp_st.high_imp_state = true;
+                } else {
+                    param_high_imp_st.high_imp_state = false;
+                }
+                AHAL_INFO("param_high_imp_st.high_imp_state:%d", param_high_imp_st.high_imp_state);
+                pal_set_param(PAL_PARAM_ID_HIGH_IMP_HEADPHONE, (void*)&param_high_imp_st, sizeof(pal_param_high_imp_state_t));
+            }
+//ASUS_BSP for high imp headphones ---
+			
             patch_type = AudioPatch::PATCH_PLAYBACK;
             AHAL_DBG("Playback patch from mix handle %d to device %x",
                   io_handle, AudioExtn::get_device_types(device_types));
@@ -1147,6 +1346,20 @@ int AudioDevice::Init(hw_device_t **device, const hw_module_t *module) {
     if (!parse_xml())
         mic_characteristics_available = true;
 
+//Jessy +++ outdoor mode and SMMI Mic test
+#if defined ASUS_AI2201_PROJECT || defined ASUS_DAVINCI_PROJECT
+    adev_->outdoor_mode_enabled = false;
+    adev_->outdoor_stream_state = 0;
+    adev_->active_stream_state= 0;
+    adev_->smmi_tool_mic_test = 0;
+#endif
+//Jessy ---
+//ASUS_BSP +++ Game mode
+#if defined ASUS_AI2201_PROJECT || defined ASUS_DAVINCI_PROJECT
+    adev_->game_mode_enabled = false;
+#endif
+//ASUS_BSP ---
+
     return ret;
 }
 
@@ -1344,6 +1557,32 @@ int AudioDevice::SetParameters(const char *kvpairs) {
             }
         }
     }
+#ifdef ASUS_DAVINCI_PROJECT // ASUS_BSP for mappingtable
+    ret = str_parms_get_int(parms, "video-param-rotation-angle-degrees", &val);
+    if (ret >= 0) {
+        switch (val) {
+        case 0:
+        case 90:
+        case 180:
+        case 270:
+            adev_->camcorder_rotation_degree = val;
+            break;
+        default:
+            ALOGW("invalid degree %d", val);
+            adev_->camcorder_rotation_degree = 0;
+            break;
+        }
+    }
+
+    ret = str_parms_get_str(parms, "cameraFacing", value, sizeof(value));
+    if (ret >= 0) {
+        ALOGD("cameraFacing %s", value);
+        if (!strcmp(value, "front"))
+            adev_->camcorder_facing = true;
+        else
+            adev_->camcorder_facing = false;
+    }
+#endif
 
     ret = str_parms_get_str(parms, "screen_state", value, sizeof(value));
     if (ret >= 0) {
@@ -1864,6 +2103,96 @@ int AudioDevice::SetParameters(const char *kvpairs) {
             sizeof(pal_param_bta2dp_t));
     }
 
+//Jessy +++ outdoor mode
+#if defined ASUS_AI2201_PROJECT || defined ASUS_DAVINCI_PROJECT
+    ret = str_parms_get_str(parms, "ring_outdoor_mode", value, sizeof(value));
+    if(ret >= 0) {
+        val = atoi(value);
+        (val) ? (adev_->outdoor_stream_state |= OUTDOOR_RING) : (adev_->outdoor_stream_state &= ~OUTDOOR_RING);
+        AHAL_VERBOSE("%s: set ring_outdoor_mode (%d), outdoor_stream_state (%x)", __func__, val, adev_->outdoor_stream_state);
+        AudioDevice::set_outdoor();
+    }
+
+    ret = str_parms_get_str(parms, "music_outdoor_mode", value, sizeof(value));
+    if(ret >= 0) {
+        val = atoi(value);
+        (val) ? (adev_->outdoor_stream_state |= OUTDOOR_MUSIC) : (adev_->outdoor_stream_state &= ~OUTDOOR_MUSIC);
+        AHAL_VERBOSE("%s: set music_outdoor_mode (%d), outdoor_stream_state (%x)", __func__, val, adev_->outdoor_stream_state);
+        AudioDevice::set_outdoor();
+    }
+
+    ret = str_parms_get_str(parms, "notification_outdoor_mode", value, sizeof(value));
+    if(ret >= 0) {
+        bool skipSetOutdoor = false;
+        val = atoi(value);
+        (val) ? (adev_->outdoor_stream_state |= OUTDOOR_NOTIFICATION) : (adev_->outdoor_stream_state &= ~OUTDOOR_NOTIFICATION);
+        AHAL_VERBOSE("%s: set notification_outdoor_mode (%d), outdoor_stream_state (%x)", __func__, val, adev_->outdoor_stream_state);
+
+        if ((adev_->active_stream_state & OUTDOOR_MUSIC) && (val)) {
+            AHAL_VERBOSE("%s: skip set notification outdoor during music playback ", __func__);
+            skipSetOutdoor = true;
+        }
+
+        if (!skipSetOutdoor)
+            AudioDevice::set_outdoor();
+    }
+
+    ret = str_parms_get_str(parms, "alarm_outdoor_mode", value, sizeof(value));
+    if(ret >= 0) {
+        val = atoi(value);
+        (val) ? (adev_->outdoor_stream_state |= OUTDOOR_ALARM) : (adev_->outdoor_stream_state &= ~OUTDOOR_ALARM);
+        AHAL_VERBOSE("%s: set alarm_outdoor_mode (%d), outdoor_stream_state (%x)", __func__, val, adev_->outdoor_stream_state);
+        AudioDevice::set_outdoor();
+    }
+
+    ret = str_parms_get_int(parms, "Stream_State", &val); //Ring 0x1 Music 0x2 Notifi 0x4 Alarm 0x8
+    if (ret >= 0) {
+        AHAL_VERBOSE("%s: Set active_stream_state to %x", __func__, val);
+
+        bool skipSetOutdoor =false;
+        if ((adev_->active_stream_state & OUTDOOR_MUSIC) && ((adev_->active_stream_state ^ val) == OUTDOOR_NOTIFICATION)) {
+            AHAL_INFO("%s:  skip notification outdoor when playing music", __func__);
+            skipSetOutdoor = true;
+        }
+
+        adev_->active_stream_state = val;
+
+//Jessy +++ ASUS ringtone feature, -18db for HEADSET
+        pal_param_ringtone_state param_ringtone_st;
+        if(adev_->active_stream_state & OUTDOOR_RING) {
+            param_ringtone_st.ringtone_state=true;
+        }else{
+            param_ringtone_st.ringtone_state=false;
+        }
+        ret = pal_set_param( PAL_PARAM_ID_RINGTONE_STATE, (void*)&param_ringtone_st, sizeof(pal_param_ringtone_state_t));
+//Jessy
+
+        if (!skipSetOutdoor)
+            AudioDevice::set_outdoor();
+    }
+
+    ret = str_parms_get_str(parms, "smmi_tool_mic_test", value, sizeof(value));
+    if (ret >= 0) {
+        ALOGD("smmi_tool_mic_test=%s", value);
+        val = atoi(value);
+        adev_->smmi_tool_mic_test = val;
+    }
+#endif
+//Jessy ---
+//ASUS_BSP +++ Game mode
+#if defined ASUS_AI2201_PROJECT || defined ASUS_DAVINCI_PROJECT
+    ret = str_parms_get_str(parms, "game_mode", value, sizeof(value));
+    if (ret >= 0) {
+        ALOGD("game mode %s", value);
+        if ((!strcmp(value, "on") && !adev_->game_mode_enabled) ||
+                (!strcmp(value, "off") && adev_->game_mode_enabled)) {
+            adev_->game_mode_enabled = !adev_->game_mode_enabled;
+            ALOGD("Toggle game mode");
+        }
+    }
+#endif
+//ASUS_BSP ---
+
     str_parms_destroy(parms);
 
 exit:
@@ -1943,6 +2272,26 @@ char* AudioDevice::GetParameters(const char *keys) {
         }
     }
 
+//ASUS_BSP +++ Game mode
+#if defined ASUS_AI2201_PROJECT || defined ASUS_DAVINCI_PROJECT
+    ret = str_parms_get_str(query, "game_mode", value, sizeof(value));
+    if (ret >= 0) {
+        bool game_mode_enabled = false;
+        game_mode_enabled = adev_->game_mode_enabled;
+
+        ALOGD("getting game mode (%d)", game_mode_enabled);
+
+        if (game_mode_enabled) {
+            str_parms_add_str(reply, "game_mode", "true");
+            goto exit;
+        } else {
+            str_parms_add_str(reply, "game_mode", "false");
+            goto exit;
+        }
+    }
+#endif
+//ASUS_BSP ---
+
     AudioExtn::audio_extn_get_parameters(adev_, query, reply);
     if (voice_)
         voice_->VoiceGetParameters(query, reply);
@@ -2001,7 +2350,11 @@ void AudioDevice::FillAndroidDeviceMap() {
 
     android_device_map_.insert(std::make_pair(AUDIO_DEVICE_IN_BUILTIN_MIC, PAL_DEVICE_IN_HANDSET_MIC));
     android_device_map_.insert(std::make_pair(AUDIO_DEVICE_IN_BACK_MIC, PAL_DEVICE_IN_SPEAKER_MIC));
+#ifdef ASUS_AI2201_PROJECT
+    android_device_map_.insert(std::make_pair(AUDIO_DEVICE_IN_COMMUNICATION, PAL_DEVICE_IN_COMMUNICATION));
+#else
     //android_device_map_.insert(std::make_pair(AUDIO_DEVICE_IN_COMMUNICATION, PAL_DEVICE_IN_COMMUNICATION));
+#endif
     //android_device_map_.insert(std::make_pair(AUDIO_DEVICE_IN_AMBIENT, PAL_DEVICE_IN_AMBIENT);
     android_device_map_.insert(std::make_pair(AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, PAL_DEVICE_IN_BLUETOOTH_SCO_HEADSET));
     android_device_map_.insert(std::make_pair(AUDIO_DEVICE_IN_WIRED_HEADSET, PAL_DEVICE_IN_WIRED_HEADSET));
@@ -2090,9 +2443,394 @@ hw_device_t* AudioDevice::GetAudioDeviceCommon()
     return &(adev_->device_.get()->common);
 }
 
+/* ASUS_BSP For CS35L45 AMP boot initial process +++ */
+#if defined ASUS_AI2201_PROJECT
+#define CRUS_SND_CARD_NUM                   (0)
+#define CRUS_DSP_FIRMWARE_STRING            "Protection"
+
+#define CRUS_SPK_DSP_FIRMWARE_MIXER         "SPK DSP1 Firmware"
+#define CRUS_SPK_DSP_PRELOAD_MIXER          "SPK DSP1 Preload Switch"
+#define CRUS_SPK_DSP_BOOTED_MIXER           "SPK DSP1 Boot Switch"
+#define CRUS_SPK_DSP_CAL_R_MIXER            "SPK DSP1 Protection cd CAL_R"
+#define CRUS_SPK_DSP_CAL_STATUS_MIXER       "SPK DSP1 Protection cd CAL_STATUS"
+#define CRUS_SPK_DSP_CAL_CHECKSUM_MIXER     "SPK DSP1 Protection cd CAL_CHECKSUM"
+#define CRUS_SPK_DSP_PARAMS_MIXER           "SPK DSP1 Protection f207 MDSYNC_WAITING"
+#define CRUS_SPK_CALI_RESISTANCE_MIXER      "SPK DSP Set CAL_R"
+
+#define CRUS_RCV_DSP_FIRMWARE_MIXER         "RCV DSP1 Firmware"
+#define CRUS_RCV_DSP_PRELOAD_MIXER          "RCV DSP1 Preload Switch"
+#define CRUS_RCV_DSP_BOOTED_MIXER           "RCV DSP1 Boot Switch"
+#define CRUS_RCV_DSP_CAL_R_MIXER            "RCV DSP1 Protection cd CAL_R"
+#define CRUS_RCV_DSP_CAL_STATUS_MIXER       "RCV DSP1 Protection cd CAL_STATUS"
+#define CRUS_RCV_DSP_CAL_CHECKSUM_MIXER     "RCV DSP1 Protection cd CAL_CHECKSUM"
+#define CRUS_RCV_DSP_PARAMS_MIXER           "RCV DSP1 Protection f207 MDSYNC_WAITING"
+#define CRUS_RCV_CALI_RESISTANCE_MIXER      "RCV DSP Set CAL_R"
+
+#define RCV_CAL_VAL_MIN 7728
+#define RCV_CAL_VAL_MAX 10454
+#define SPK_CAL_VAL_MIN 7728
+#define SPK_CAL_VAL_MAX 10454
+
+#define Z_TO_OHM(z) ((z) * 5.85714 / 8192.0)
+
+#define CRUS_SPK_CAL_R_FILE "/vendor/factory/audio/spk_cal_val"
+#define CRUS_RCV_CAL_R_FILE "/vendor/factory/audio/rcv_cal_val"
+
+static int readCalValue(char *fn, int *value)
+{
+	FILE *fp;
+	char valueStr[8] = {0};
+
+	fp = fopen(fn, "r");
+	if (!fp) {
+		ALOGE("%s: failed to open %s", __func__, fn);
+		return -EACCES;
+	}
+
+	fgets(valueStr, 8, fp);
+	*value = atoi(valueStr);
+	fclose(fp);
+	return 0;
+}
+
+static int adev_crus_smartpa_init(void)
+{
+	static bool crus_smartpa_inited = false;
+	struct mixer *mixer = NULL;
+	struct mixer_ctl *ctl = NULL;
+	char cali_file[256] = {0};
+	int spk_cal_r = 8900; // For example, speaker calibration resistance=8900, Z_TO_OHM(8900)=6.36 ohm
+	int rcv_cal_r = 9100; // For example, receiver calibration resistance=9100, Z_TO_OHM(9100)=6.51 ohm
+	int retry;
+	int ret;
+
+	ALOGD("%s: enter", __func__);
+
+	if (!crus_smartpa_inited) {
+		/* First of all, check if smartpa driver is ready in case of working as module */
+		for (retry = 300; retry; retry--) {
+			if (mixer) {
+				mixer_close(mixer);
+			}
+			mixer = mixer_open(CRUS_SND_CARD_NUM);
+
+			if (!mixer) {
+				ALOGE("%s: Failed to open mixer",  __func__);
+				continue;
+			}
+
+			// Check Speaker
+			ctl = mixer_get_ctl_by_name(mixer, CRUS_SPK_DSP_FIRMWARE_MIXER);
+			if (!ctl) {
+				ALOGE("%s: Could not get ctl for mixer cmd - %s(%d)", __func__, CRUS_SPK_DSP_FIRMWARE_MIXER, retry);
+				continue;
+			}
+			ALOGE("%s: Get mixer cmd - %s(%d)", __func__, CRUS_SPK_DSP_FIRMWARE_MIXER, retry);
+
+			// Check Receiver
+			ctl = mixer_get_ctl_by_name(mixer, CRUS_RCV_DSP_FIRMWARE_MIXER);
+			if (!ctl) {
+				ALOGE("%s: Could not get ctl for mixer cmd - %s(%d)", __func__, CRUS_RCV_DSP_FIRMWARE_MIXER, retry);
+				continue;
+			}
+			ALOGE("%s: Get mixer cmd - %s(%d)", __func__, CRUS_RCV_DSP_FIRMWARE_MIXER, retry);
+
+			// Both speaker and receiver are ready
+			break;
+		}
+
+		/* Driver is not ready yet? */
+		if (!retry) {
+			ALOGE("%s: SmartPA driver is not ready yet!", __func__);
+			return -EINVAL;
+		}
+
+		/* Next, restore smartpa calibration data from platform non-volatile memory */
+		sprintf(cali_file, "%s", CRUS_SPK_CAL_R_FILE);
+		if (readCalValue(cali_file, &spk_cal_r)) {
+			ALOGE("%s: read spk_cal_r %s failed", __func__, cali_file);
+			spk_cal_r = 0;
+		}
+
+		memset(&cali_file, 0, sizeof(cali_file));
+		sprintf(cali_file, "%s", CRUS_RCV_CAL_R_FILE);
+		if (readCalValue(cali_file, &rcv_cal_r)) {
+			ALOGE("%s: read rcv_cal_r %s failed", __func__, cali_file);
+			rcv_cal_r = 0;
+		}
+		ALOGD("%s: spk_cal_r:%d rcv_cal_r:%d", __func__, spk_cal_r, rcv_cal_r);
+
+		/* Update speaker calibration resistance */
+		if (spk_cal_r == 0 ||rcv_cal_r == 0 )	{
+			ALOGD("%s: spk_cal_r:%d rcv_cal_r:%d value not normal ignore AMP calibration value appliy", __func__, spk_cal_r, rcv_cal_r);
+		} else	{
+			ctl = mixer_get_ctl_by_name(mixer, CRUS_SPK_CALI_RESISTANCE_MIXER);
+			if (!ctl)	{
+				ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_SPK_CALI_RESISTANCE_MIXER);
+			} else	{
+				ret = mixer_ctl_set_value(ctl, 0, spk_cal_r);
+				if (ret) {
+					ALOGE("%s: Failed to set ctl - %s", __func__, CRUS_SPK_CALI_RESISTANCE_MIXER);
+				}
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_SPK_CALI_RESISTANCE_MIXER);
+		}
+
+	        /* Update receiver calibration resistance */
+		ctl = mixer_get_ctl_by_name(mixer, CRUS_RCV_CALI_RESISTANCE_MIXER);
+		if (!ctl) {
+			ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_RCV_CALI_RESISTANCE_MIXER);
+		} else	{
+			ret = mixer_ctl_set_value(ctl, 0, rcv_cal_r);
+			if (ret) {
+				ALOGE("%s: Failed to set ctl - %s", __func__, CRUS_RCV_CALI_RESISTANCE_MIXER);
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_RCV_CALI_RESISTANCE_MIXER);
+		}
+
+		/* Now start to preload speaker and receiver firmware */
+		// Preload speaker firmware
+		ctl = mixer_get_ctl_by_name(mixer, CRUS_SPK_DSP_FIRMWARE_MIXER);
+		if (!ctl)	{
+			ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_SPK_DSP_FIRMWARE_MIXER);
+		} else	{
+			ret = mixer_ctl_set_enum_by_string(ctl, CRUS_DSP_FIRMWARE_STRING);
+			if (ret) {
+				ALOGE("%s: Failed to set ctl - %s", __func__, CRUS_DSP_FIRMWARE_STRING);
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_DSP_FIRMWARE_STRING);
+		}
+
+		ctl = mixer_get_ctl_by_name(mixer, CRUS_SPK_DSP_PRELOAD_MIXER);
+		if (!ctl)	{
+			ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_SPK_DSP_PRELOAD_MIXER);
+		} else {
+			ret = mixer_ctl_set_value(ctl, 0, 1);
+			if (ret)	{
+				ALOGE("%s: Failed to set ctl - %s", __func__, CRUS_SPK_DSP_PRELOAD_MIXER);
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_SPK_DSP_PRELOAD_MIXER);
+		}
+
+		ctl = mixer_get_ctl_by_name(mixer, CRUS_SPK_DSP_BOOTED_MIXER);
+		if (!ctl)	{
+			ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_SPK_DSP_BOOTED_MIXER);
+		} else {
+			ret = mixer_ctl_set_value(ctl, 0, 1);
+			if (ret)	{
+				ALOGE("%s: Failed to set ctl - %s", __func__, CRUS_SPK_DSP_BOOTED_MIXER);
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_SPK_DSP_BOOTED_MIXER);
+		}
+
+		// Preload receiver firmware
+		ctl = mixer_get_ctl_by_name(mixer, CRUS_RCV_DSP_FIRMWARE_MIXER);
+		if (!ctl)	{
+			ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_RCV_DSP_FIRMWARE_MIXER);
+		} else	{
+			ret = mixer_ctl_set_enum_by_string(ctl, CRUS_DSP_FIRMWARE_STRING);
+			if (ret) {
+				ALOGE("%s: Failed to set ctl - %s",	__func__, CRUS_DSP_FIRMWARE_STRING);
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_DSP_FIRMWARE_STRING);
+		}
+
+		ctl = mixer_get_ctl_by_name(mixer, CRUS_RCV_DSP_PRELOAD_MIXER);
+		if (!ctl)	{
+			ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_RCV_DSP_PRELOAD_MIXER);
+		} else	{
+			ret = mixer_ctl_set_value(ctl, 0, 1);
+			if (ret)	{
+				ALOGE("%s: Failed to set ctl - %s",	__func__, CRUS_RCV_DSP_PRELOAD_MIXER);
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_RCV_DSP_PRELOAD_MIXER);
+		}
+
+		ctl = mixer_get_ctl_by_name(mixer, CRUS_RCV_DSP_BOOTED_MIXER);
+		if (!ctl)	{
+			ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_RCV_DSP_BOOTED_MIXER);
+		} else	{
+			ret = mixer_ctl_set_value(ctl, 0, 1);
+			if (ret)	{
+				ALOGE("%s: Failed to set ctl - %s", __func__, CRUS_RCV_DSP_BOOTED_MIXER);
+			}
+			ALOGE("%s: Finish mixer cmd - %s", __func__, CRUS_RCV_DSP_BOOTED_MIXER);
+		}
+
+	        /* TODO :And then, wait smartpa algorithm controls to get ready if the controls are going to be used in mixer_paths.xml */
+	        #if 0
+	        for (retry = 100; retry; retry--) {
+	            if (mixer) {
+	                mixer_close(mixer);
+	            }
+
+	            usleep(10 * 1000);
+
+	            mixer = mixer_open(CRUS_SND_CARD_NUM);
+	            if (!mixer) {
+	                ALOGE("%s: Failed to open mixer",  __func__);
+	                continue;
+	            }
+
+	            // Speaker
+	            ctl = mixer_get_ctl_by_name(mixer, CRUS_SPK_DSP_CAL_R_MIXER);
+	            if (!ctl) {
+	                ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_SPK_DSP_CAL_R_MIXER);
+	                continue;
+	            }
+
+	            ctl = mixer_get_ctl_by_name(mixer, CRUS_SPK_DSP_PARAMS_MIXER);
+	            if (!ctl) {
+	                ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_SPK_DSP_PARAMS_MIXER);
+	                continue;
+	            }
+
+	            // Receiver
+	            ctl = mixer_get_ctl_by_name(mixer, CRUS_RCV_DSP_CAL_R_MIXER);
+	            if (!ctl) {
+	                ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_RCV_DSP_CAL_R_MIXER);
+	                continue;
+	            }
+
+	            ctl = mixer_get_ctl_by_name(mixer, CRUS_RCV_DSP_PARAMS_MIXER);
+	            if (!ctl) {
+	                ALOGE("%s: Could not get ctl for mixer cmd - %s", __func__, CRUS_RCV_DSP_PARAMS_MIXER);
+	                continue;
+	            }
+
+	            // Both speaker and receiver are ready
+	            break;
+	        }
+
+	        /* Algorithm is not ready yet? */
+	        if (!retry) {
+	            ALOGE("%s: SmartPA algorithm controls are not ready yet!", __func__);
+	        }
+	        #endif
+
+		crus_smartpa_inited = true;
+		property_set("vendor.audio.crus.smartpa.inited", "true");
+	}
+
+	if (mixer) {
+		ALOGD("%s: Total mixer controls=%u", __func__, mixer_get_num_ctls(mixer));
+		mixer_close(mixer);
+	}
+
+	ALOGD("%s: exit", __func__);
+	return 0;
+}
+/* ASUS_BSP For CS35L45 AMP boot initial process --- */
+
+/* ASUS_BSP For double check Uart debug port process +++ */
+static int adev_uart_debug_port_init(void)
+{
+	char uart_status_value[256] = {0};
+
+	ALOGD("%s[Audio][Debug] : enter", __func__);
+
+	property_get("vendor.atd.oem-uart", uart_status_value, "");
+	ALOGE("%s[Audio][Debug] : Get vendor.atd.oem-uart : %s", __func__, uart_status_value);
+	
+	if (strncmp("1", uart_status_value, sizeof("1")) == 0) {
+		property_set("vendor.atd.oem-uart", "1");
+		ALOGE("%s[Audio][Debug] : Reset vendor.atd.oem-uart to 1 for trun on Uart", __func__);
+	} else	{
+		property_set("vendor.atd.oem-uart", "0");
+		ALOGE("%s[Audio][Debug] : Reset vendor.atd.oem-uart to 0 for trun off Uart", __func__);
+	}
+	ALOGD("%s[Audio][Debug] : exit", __func__);
+	return 0;
+}
+#endif
+/* ASUS_BSP For double check Uart debug port process --- */
+
+//Jessy +++ outdoor mode
+#if defined ASUS_AI2201_PROJECT
+    void AudioDevice::set_outdoor() {
+
+
+    bool old_outdoor_enable = adev_->outdoor_mode_enabled;
+    if (adev_->outdoor_stream_state & adev_->active_stream_state)
+        adev_->outdoor_mode_enabled = true;
+    else
+        adev_->outdoor_mode_enabled = false;
+
+    AHAL_DBG("%s: outdoor_mode_enabled =%d outdoor_stream_state=%x ,  active_stream_state=%x"
+        , __func__, adev_->outdoor_mode_enabled, adev_->outdoor_stream_state, adev_->active_stream_state);
+
+    if ( adev_->outdoor_mode_enabled == old_outdoor_enable)
+        return;
+
+    AHAL_INFO("set_outdoor mode change");
+
+    struct mixer *mixer = NULL;
+    struct mixer_ctl *ctl_rcv_uc_switch_enable = NULL;
+    struct mixer_ctl *ctl_spk_uc_switch_enable = NULL;
+    struct mixer_ctl *ctl_rcv_uc_file = NULL;
+    struct mixer_ctl *ctl_spk_uc_file = NULL;
+
+    mixer = mixer_open(CRUS_SND_CARD_NUM);
+
+    ctl_rcv_uc_switch_enable = mixer_get_ctl_by_name(mixer, "RCV Fast Use Case Switch Enable");
+    ctl_spk_uc_switch_enable = mixer_get_ctl_by_name(mixer, "SPK Fast Use Case Switch Enable");
+    ctl_rcv_uc_file = mixer_get_ctl_by_name(mixer, "RCV Fast Use Case Delta File");
+    ctl_spk_uc_file = mixer_get_ctl_by_name(mixer, "SPK Fast Use Case Delta File");
+
+    if (!ctl_rcv_uc_switch_enable || !ctl_spk_uc_switch_enable || !ctl_rcv_uc_file || !ctl_spk_uc_file) {
+        ALOGE("%s: Could not get ctl for mixer", __func__);
+        return;
+    }
+
+    mixer_ctl_set_value(ctl_rcv_uc_switch_enable, 0, 0);
+    mixer_ctl_set_value(ctl_spk_uc_switch_enable, 0, 0);
+
+    if (adev_->outdoor_mode_enabled) {
+        mixer_ctl_set_enum_by_string(ctl_rcv_uc_file, "cs35l45-rcv-outdoor.txt");
+        mixer_ctl_set_enum_by_string(ctl_spk_uc_file, "cs35l45-spk-outdoor.txt");
+    } else {
+        mixer_ctl_set_enum_by_string(ctl_rcv_uc_file, "cs35l45-rcv-music.txt");
+        mixer_ctl_set_enum_by_string(ctl_spk_uc_file, "cs35l45-spk-music.txt");
+    }
+
+    mixer_ctl_set_value(ctl_rcv_uc_switch_enable, 0, 1);
+    mixer_ctl_set_value(ctl_spk_uc_switch_enable, 0, 1);
+
+    mixer_close(mixer);
+}
+#endif
+//Jessy ---
+
+//mei +++ outdoor mode
+#if defined ASUS_DAVINCI_PROJECT
+    void AudioDevice::set_outdoor() {
+
+    bool old_outdoor_enable = adev_->outdoor_mode_enabled;
+    if (adev_->outdoor_stream_state & adev_->active_stream_state)
+        adev_->outdoor_mode_enabled = true;
+    else
+        adev_->outdoor_mode_enabled = false;
+
+    AHAL_INFO("%s: outdoor_mode_enabled =%d outdoor_stream_state=%x ,  active_stream_state=%x"
+        , __func__, adev_->outdoor_mode_enabled, adev_->outdoor_stream_state, adev_->active_stream_state);
+
+    if ( adev_->outdoor_mode_enabled == old_outdoor_enable)
+        return;
+
+    AHAL_INFO("set_outdoor mode change");
+    pal_param_outdoor_mode_t param_outdoor_mode;
+    param_outdoor_mode.enable = adev_->outdoor_mode_enabled;
+    pal_set_param(PAL_PARAM_ID_OUTDOOR_MODE, (void*)&param_outdoor_mode,
+            sizeof(pal_param_outdoor_mode_t));
+    
+}
+#endif
+//mei outdoor ---
+
 static int adev_open(const hw_module_t *module, const char *name __unused,
                      hw_device_t **device) {
     int32_t ret = 0;
+    int retryCount = 50;
     AHAL_DBG("Enter");
 
     std::shared_ptr<AudioDevice> adevice = AudioDevice::GetInstance();
@@ -2116,7 +2854,29 @@ static int adev_open(const hw_module_t *module, const char *name __unused,
         AHAL_ERR("error, audio device init failed, ret(%d),*device(%p)",
                  ret, *device);
     }
+
     adevice->adev_init_mutex.unlock();
+
+    /* ASUS_BSP For CS35L45 AMP boot initial process */
+#if defined ASUS_AI2201_PROJECT
+    AHAL_ERR("[ASUS] Begin init crus");
+    adev_crus_smartpa_init();
+// ASUS_BSP Audio for boot sound +++
+    while (retryCount > 0) {
+        if (property_get_bool("vendor.audio.boot_sound.completed", false)) {
+            break;
+        }
+        usleep(100000);
+        retryCount--;
+    }
+    ALOGD("boot sound delayed %d ms", (50 - retryCount) * 100);
+// ASUS_BSP Audio for boot sound ---
+
+    /* ASUS_BSP For double check Uart debug port process */
+    AHAL_ERR("[ASUS] Begin double check Uart debug port");
+    adev_uart_debug_port_init();
+#endif
+
 exit:
     AHAL_DBG("Exit, status %d", ret);
     return ret;

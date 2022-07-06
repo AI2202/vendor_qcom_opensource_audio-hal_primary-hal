@@ -463,6 +463,10 @@ protected:
     struct pal_volume_data *volume_; /* used to cache volume */
     std::map <audio_devices_t, pal_device_id_t> mAndroidDeviceMap;
     int mmap_shared_memory_fd;
+
+// ASUS BSP : OZO porting +++
+    void *ozo_effect = nullptr;
+// ASUS BSP : OZO porting ---
 };
 
 class StreamOutPrimary : public StreamPrimary {
@@ -607,5 +611,8 @@ protected:
     bool isECEnabled = false;
     bool isNSEnabled = false;
     bool effects_applied_ = true;
+#ifdef ASUS_AI2201_PROJECT
+    int totalMuteBytes;//Jessy +++
+#endif
 };
 #endif  // ANDROID_HARDWARE_AHAL_ASTREAM_H_

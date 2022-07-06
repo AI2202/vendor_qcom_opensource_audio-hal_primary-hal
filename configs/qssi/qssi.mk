@@ -47,6 +47,14 @@ ifneq ($(strip $(TARGET_USES_RRO)), true)
 DEVICE_PACKAGE_OVERLAYS += hardware/qcom/audio/configs/common/overlay
 endif
 
+# ASUS_BSP Audio +++
+ifeq ($(ASUS_BUILD_PROJECT),AI2201)
+PRODUCT_COPY_FILES += \
+    vendor/asus/AI2201/audio/boot_sound/init.asus.boot_sound.sh:system/bin/init.asus.boot_sound.sh \
+    vendor/asus/AI2201/audio/boot_sound/boot_sound.wav:system/etc/boot_sound.wav
+endif
+# ASUS_BSP Audio ---
+
 # Low latency audio buffer size in frames
 PRODUCT_PROPERTY_OVERRIDES += \
     vendor.audio_hal.period_size=192
@@ -104,7 +112,7 @@ af.fast_track_multiplier=1
 
 #Enable offload audio video playback by default
 PRODUCT_PROPERTY_OVERRIDES += \
-audio.offload.video=true
+audio.offload.video=false
 
 #Enable music through deep buffer
 PRODUCT_PROPERTY_OVERRIDES += \

@@ -49,6 +49,13 @@ int AudioVoice::SetMode(const audio_mode_t mode) {
 
     AHAL_DBG("Enter: mode: %d", mode);
     if (mode_ != mode) {
+#if defined ASUS_DAVINCI_PROJECT // ASUS_BSP leo +++
+        if (mode == AUDIO_MODE_IN_CALL || mode == AUDIO_MODE_IN_COMMUNICATION) {
+            property_set("vendor.audio.in_call", "1");
+        } else {
+            property_set("vendor.audio.in_call", "0");
+        }
+#endif // ASUS_BSP leo ---
         /*start a new session for full voice call*/
         if ((mode ==  AUDIO_MODE_CALL_SCREEN && mode_ == AUDIO_MODE_IN_CALL)||
            (mode == AUDIO_MODE_IN_CALL && mode_ == AUDIO_MODE_CALL_SCREEN)){
@@ -66,6 +73,13 @@ int AudioVoice::SetMode(const audio_mode_t mode) {
     AHAL_DBG("Exit ret: %d", ret);
     return ret;
 }
+
+#if defined ASUS_AI2201_PROJECT // ASUS_BSP +++
+audio_mode_t AudioVoice::GetMode(void) {
+    AHAL_DBG("GetMode: %d", mode_);
+    return mode_;
+}
+#endif // ASUS_BSP ---
 
 int AudioVoice::VoiceSetParameters(const char *kvpairs) {
     int value, i;
@@ -375,13 +389,21 @@ int AudioVoice::GetMatchingTxDevices(const std::set<audio_devices_t>& rx_devices
                 break;
             case AUDIO_DEVICE_OUT_LINE:
             case AUDIO_DEVICE_OUT_WIRED_HEADPHONE:
+                #if defined ASUS_DAVINCI_PROJECT || defined ASUS_AI2201_PROJECT
+                tx_devices.insert(AUDIO_DEVICE_IN_BACK_MIC);//asus_bsp follow audio EE suggestion change from AUDIO_DEVICE_IN_BUILTIN_MIC to AUDIO_DEVICE_IN_BACK_MIC
+                #else
                 tx_devices.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                #endif
                 break;
             case AUDIO_DEVICE_OUT_USB_HEADSET:
                 if (adevice->usb_input_dev_enabled)
                     tx_devices.insert(AUDIO_DEVICE_IN_USB_HEADSET);
                 else
+                    #if defined ASUS_DAVINCI_PROJECT
+                    tx_devices.insert(AUDIO_DEVICE_IN_BACK_MIC);//asus_bsp follow audio EE suggestion change from AUDIO_DEVICE_IN_BUILTIN_MIC to AUDIO_DEVICE_IN_BACK_MIC
+                    #else
                     tx_devices.insert(AUDIO_DEVICE_IN_BUILTIN_MIC);
+                    #endif
                 break;
             case AUDIO_DEVICE_OUT_BLUETOOTH_SCO:
             case AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET:
@@ -638,6 +660,19 @@ int AudioVoice::VoiceStart(voice_session_t *session) {
         palDevices[0].id = PAL_DEVICE_IN_PROXY;  //overwrite the device with proxy dev
         palDevices[1].id = PAL_DEVICE_OUT_PROXY;  //overwrite the device with proxy dev
     }
+    
+    // ASUS_BSP: TTY custom-config FLUENCE_NN_SM +++
+    if (streamAttributes.info.voice_call_info.tty_mode == PAL_TTY_FULL) {
+        /**  device pairs for VCO usecase
+          *  <headphones, headset-mic>
+          *  constom-config devices accordingly.
+          */
+        strlcpy(palDevices[0].custom_config.custom_key, "tty-tx-fnnsm",
+                    sizeof(palDevices[0].custom_config.custom_key));
+        AHAL_INFO("VoiceStart: Setting TTY Full custom key as %s", palDevices[0].custom_config.custom_key);
+    }
+    // ASUS_BSP: TTY custom-config FLUENCE_NN_SM ---
+    
     if (streamAttributes.info.voice_call_info.tty_mode == PAL_TTY_HCO) {
         /**  device pairs for HCO usecase
           *  <handset, headset-mic>
@@ -650,6 +685,12 @@ int AudioVoice::VoiceStart(voice_session_t *session) {
             palDevices[0].id = PAL_DEVICE_IN_WIRED_HEADSET;
         else
             AHAL_ERR("Invalid device pair for the usecase");
+            
+        // ASUS_BSP: TTY custom-config FLUENCE_NN_SM +++
+        strlcpy(palDevices[0].custom_config.custom_key, "tty-tx-fnnsm",
+                    sizeof(palDevices[0].custom_config.custom_key));
+        AHAL_INFO("VoiceStart: Setting TTY HCO custom key as %s", palDevices[0].custom_config.custom_key);
+        // ASUS_BSP: TTY custom-config FLUENCE_NN_SM --
     }
     if (streamAttributes.info.voice_call_info.tty_mode == PAL_TTY_VCO) {
         /**  device pairs for VCO usecase

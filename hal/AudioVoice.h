@@ -101,6 +101,9 @@ public:
     int max_voice_sessions_;
     std::mutex voice_mutex_;
     int SetMode(const audio_mode_t mode);
+#if defined ASUS_AI2201_PROJECT // ASUS_BSP +++
+    audio_mode_t GetMode(void);
+#endif // ASUS_BSP --
     int VoiceStart(voice_session_t *session);
     int VoiceStop(voice_session_t *session);
     int VoiceSetDevice(voice_session_t *session);

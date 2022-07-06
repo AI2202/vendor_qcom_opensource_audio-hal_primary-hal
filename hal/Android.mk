@@ -43,9 +43,18 @@ LOCAL_CFLAGS += -Wno-unused-function
 LOCAL_CFLAGS += -Wno-unused-local-typedef
 LOCAL_CPPFLAGS += -fexceptions
 
+# ASUS_BSP +++
+ifeq ($(ASUS_BUILD_PROJECT),AI2202)
+LOCAL_CFLAGS   += -DASUS_DAVINCI_PROJECT
+else ifeq ($(ASUS_BUILD_PROJECT),AI2201)
+LOCAL_CFLAGS   += -DASUS_AI2201_PROJECT
+endif
+# ASUS_BSP ---
+
 LOCAL_C_INCLUDES += \
     system/media/audio_utils/include \
     external/expat/lib \
+    external/tinyalsa/include \
     vendor/qcom/opensource/core-utils/fwk-detect \
     vendor/qcom/opensource/pal \
     $(call include-path-for, audio-effects) \
@@ -68,6 +77,7 @@ LOCAL_SHARED_LIBRARIES := \
     libdl \
     libaudioutils \
     libexpat \
+    libtinyalsa \
     libhidlbase \
     libprocessgroup \
     libutils \

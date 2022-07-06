@@ -158,6 +158,16 @@ PRODUCT_PACKAGES += audioadsprpcd
 PRODUCT_PACKAGES += vendor.qti.audio-adsprpc-service.rc
 PRODUCT_PACKAGES += android.hardware.audio.service_64
 PRODUCT_PACKAGES += android.hardware.audio.service_64.rc
+# ASUS_BSP for load customized acdb +++
+PRODUCT_PACKAGES += AI2201_acdb_cal.acdb
+PRODUCT_PACKAGES += AI2201_workspaceFileXml.qwsp
+PRODUCT_PACKAGES += AI2202_acdb_cal.acdb
+PRODUCT_PACKAGES += AI2202_workspaceFileXml.qwsp
+PRODUCT_PACKAGES += AI2202_EU_acdb_cal.acdb
+PRODUCT_PACKAGES += AI2202_EU_workspaceFileXml.qwsp
+# ASUS_BSP for load customized acdb ---
+PRODUCT_PACKAGES += IDP_acdb_cal.acdb
+PRODUCT_PACKAGES += IDP_workspaceFileXml.qwsp
 PRODUCT_PACKAGES += MTP_acdb_cal.acdb
 PRODUCT_PACKAGES += MTP_workspaceFileXml.qwsp
 PRODUCT_PACKAGES += CDP_acdb_cal.acdb
@@ -179,8 +189,14 @@ PRODUCT_PACKAGES += QRD_diwali_sku1_workspaceFileXml.qwsp
 PRODUCT_PACKAGES += fai__2.3.0_0.1__3.0.0_0.0__eai_1.10.pmd
 PRODUCT_PACKAGES += fai__2.3.0_0.1__3.0.0_0.0__eai_1.36_enpu2_comp.pmd
 PRODUCT_PACKAGES += fai__2.0.0_0.1__3.0.0_0.0__eai_1.36_enpu2.pmd
+PRODUCT_PACKAGES += fai__2.6.0_0.0__3.0.0_0.0__eai_1.43_enpu2.pmd
 PRODUCT_PACKAGES += fai__2.7.2_0.0__3.0.0_0.0__eai_1.36_enpu2.pmd
 PRODUCT_PACKAGES += fai__2.7.20_0.0__3.0.0_0.0__eai_1.36_enpu2.pmd
+PRODUCT_PACKAGES += fai__2.7.20_0.0__3.0.0_0.0__eai_1.43_enpu2.pmd
+PRODUCT_PACKAGES += fai__2.7.4_0.0__3.0.0_0.0__eai_1.10_enpu1.pmd
+PRODUCT_PACKAGES += fai__4.8.1_0.0__3.0.0_0.0__eai_1.36_enpu2.pmd
+PRODUCT_PACKAGES += fai__4.8.2_0.0__3.0.0_0.0__eai_1.43_enpu2.pmd
+PRODUCT_PACKAGES += fai_3.0.0_0.0_eai_1.00.pmd
 PRODUCT_PACKAGES += fai__3.0.0_0.0__eai_1.36_enpu2.pmd
 PRODUCT_PACKAGES += libfmpal
 PRODUCT_PACKAGES += event.eai
@@ -210,6 +226,7 @@ CONFIG_SKU_OUT_DIR := $(TARGET_COPY_OUT_VENDOR)/etc/audio/sku_$(DEVICE_SKU)
 PRODUCT_COPY_FILES += \
     $(CONFIG_HAL_SRC_DIR)/audio_effects.conf:$(CONFIG_SKU_OUT_DIR)/audio_effects.conf \
     $(CONFIG_HAL_SRC_DIR)/audio_effects.xml:$(CONFIG_SKU_OUT_DIR)/audio_effects.xml \
+    $(CONFIG_HAL_SRC_DIR)/audio_effects.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio_effects.xml \
     $(CONFIG_HAL_SRC_DIR)/card-defs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/card-defs.xml \
     $(CONFIG_HAL_SRC_DIR)/microphone_characteristics.xml:$(TARGET_COPY_OUT_VENDOR)/etc/microphone_characteristics.xml \
     $(CONFIG_HAL_SRC_DIR)/mixer_paths_waipio_qrd.xml:$(CONFIG_SKU_OUT_DIR)/mixer_paths_waipio_qrd.xml \
@@ -310,6 +327,54 @@ PRODUCT_COPY_FILES += \
     $(TOPDIR)vendor/qcom/opensource/audio-hal/primary-hal/configs/common/codec2/service/1.0/c2audio.vendor.ext-arm.policy:vendor/etc/seccomp_policy/c2audio.vendor.ext-arm.policy \
     $(TOPDIR)vendor/qcom/opensource/audio-hal/primary-hal/configs/common/codec2/service/1.0/c2audio.vendor.ext-arm64.policy:vendor/etc/seccomp_policy/c2audio.vendor.ext-arm64.policy
 
+# ASUS_BSP +++
+ifeq ($(ASUS_BUILD_PROJECT),AI2201)
+$(warning build audio hal for AI2201...)
+
+PRODUCT_COPY_FILES += \
+    $(call find-copy-subdir-files,*,vendor/asus/AI2201/audio/adsp/image,$(TARGET_COPY_OUT_VENDOR)/firmware/)  \
+    $(call find-copy-subdir-files,*,vendor/asus/AI2201/audio/adsp_dallas/image,$(TARGET_COPY_OUT_VENDOR)/firmware_dallas/)  \
+    $(call find-copy-subdir-files,*,vendor/asus/AI2201/audio/Cirrus/fw,$(TARGET_COPY_OUT_VENDOR)/firmware/)  \
+    $(call find-copy-subdir-files,*,vendor/asus/AI2201/audio/Cirrus/fw,$(TARGET_COPY_OUT_VENDOR)/firmware_dallas/)  \
+    $(call find-copy-subdir-files,*,vendor/asus/AI2201/audio/scripts/vendor/,$(TARGET_COPY_OUT_VENDOR)/bin/)
+
+PRODUCT_COPY_FILES += \
+    vendor/asus/AI2201/audio/boot_sound/boot_sound.wav:$(TARGET_COPY_OUT_VENDOR)/etc/boot_sound.wav
+
+PRODUCT_COPY_FILES += \
+    $(CONFIG_HAL_SRC_DIR)/mixer_paths_AI2201.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/mixer_paths_AI2201.xml \
+    $(CONFIG_HAL_SRC_DIR)/mixer_paths_AI2201_EU.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/mixer_paths_AI2201_EU.xml \
+    $(CONFIG_PAL_SRC_DIR)/resourcemanager_AI2201.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/resourcemanager_AI2201.xml \
+    $(CONFIG_PAL_SRC_DIR)/usecaseKvManager_AI2201.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/usecaseKvManager_AI2201.xml \
+    $(CONFIG_HAL_SRC_DIR)/audio_effects_AI2201.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/audio_effects_AI2201.xml \
+    $(CONFIG_HAL_SRC_DIR)/audio_policy_volumes_AI2201.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/audio_policy_volumes_AI2201.xml \
+    $(CONFIG_HAL_SRC_DIR)/default_volume_tables_AI2201.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/default_volume_tables_AI2201.xml \
+    $(CONFIG_HAL_SRC_DIR)/audio_policy_configuration_AI2201.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/AI2201/audio_policy_configuration_AI2201.xml
+
+endif
+# ASUS_BSP ---
+
+# ASUS_BSP for DAVINCI +++
+ifeq ($(ASUS_BUILD_PROJECT),AI2202)
+$(warning build audio hal for AI2202...)
+
+PRODUCT_COPY_FILES += \
+    $(call find-copy-subdir-files,*,vendor/asus/AI2202/audio/adsp/8450/image,$(TARGET_COPY_OUT_VENDOR)/firmware_waipio/) \
+    $(call find-copy-subdir-files,*,vendor/asus/AI2202/audio/adsp/8475/image,$(TARGET_COPY_OUT_VENDOR)/firmware/)
+
+PRODUCT_COPY_FILES += \
+    $(CONFIG_HAL_SRC_DIR)/mixer_paths_DAVINCI.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/mixer_paths_DAVINCI.xml \
+    $(CONFIG_HAL_SRC_DIR)/mixer_paths_DAVINCI_EU.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/mixer_paths_DAVINCI_EU.xml \
+    $(CONFIG_PAL_SRC_DIR)/resourcemanager_davinci.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/resourcemanager_davinci.xml \
+    $(CONFIG_PAL_SRC_DIR)/usecaseKvManager_davinci.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/usecaseKvManager_davinci.xml \
+    $(CONFIG_HAL_SRC_DIR)/audio_effects_AI2202.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/audio_effects_AI2202.xml \
+    $(CONFIG_HAL_SRC_DIR)/audio_policy_volumes_AI2202.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/audio_policy_volumes_AI2202.xml \
+    $(CONFIG_HAL_SRC_DIR)/default_volume_tables_AI2202.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/default_volume_tables_AI2202.xml \
+    $(CONFIG_HAL_SRC_DIR)/audio_policy_configuration_AI2202.xml:$(TARGET_COPY_OUT_VENDOR)/etc/audio/DAVINCI/audio_policy_configuration_AI2202.xml
+
+endif
+# ASUS_BSP for DAVINCI ---
+
 # Reduce client buffer size for fast audio output tracks
 PRODUCT_PROPERTY_OVERRIDES += \
     af.fast_track_multiplier=1
@@ -374,7 +439,7 @@ vendor.audio.offload.buffer.size.kb=32
 
 #Enable offload audio video playback by default
 PRODUCT_PROPERTY_OVERRIDES += \
-audio.offload.video=true
+audio.offload.video=false
 
 #Enable audio track offload by default
 PRODUCT_PROPERTY_OVERRIDES += \
@@ -594,7 +659,7 @@ vendor.audio.feature.wsa.enable=false \
 vendor.audio.feature.audiozoom.enable=false \
 vendor.audio.feature.snd_mon.enable=true \
 vendor.audio.feature.dmabuf.cma.memory.enable=true \
-vendor.audio.hdr.record.enable=false
+vendor.audio.hdr.record.enable=true
 
 
 # for HIDL related packages
